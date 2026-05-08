@@ -61,7 +61,7 @@ final class AuthApiController extends AbstractController
         ], Response::HTTP_OK);
     }
     #[Route('/api/token/refresh', name: 'refresh_token', methods: ['POST'])]
-    public function refresh(Request $request, EntityManagerInterface $em, DeviceRepository $deviceRepository): Response
+    public function refresh(Request $request, EntityManagerInterface $em, DeviceRepository $deviceRepository, JWTTokenManagerInterface $jwtManager): Response
     {
         $data = json_decode($request->getContent(), true);
         $refreshToken = $data['refresh_token'];
@@ -76,21 +76,64 @@ final class AuthApiController extends AbstractController
             }
         }
 
+        if ($device->isCompromised()) {
+            $user = $device->getUser();
+            $userDevices = $deviceRepository->findBy(['user' => $user]);
+
+            foreach ($userDevices as $userDevice) {
+                $userDevice->setRefreshToken('');
+                $userDevice->setIsRevoked(true);
+                $userDevice->setIsCompromised(true);
+                $userDevice->setExpiresAt(new DateTime('-1 day'));
+            }
+
+            $em->flush();
+
+            return $this->json([], Response::HTTP_UNAUTHORIZED);
+        }
+
         if ($device->isRevoked() || $device->getExpiresAt() < new DateTime()) {
             return $this->json([], Response::HTTP_NOT_FOUND);
+        }
+
+        if (
+            $device->getPreviouseRefreshToken() !== null &&
+            password_verify($refreshToken, $device->getPreviouseRefreshToken())
+        ) {
+
+            $device->setIsCompromised(true);
+
+            $user = $device->getUser();
+            $userDevices = $deviceRepository->findBy(['user' => $user]);
+
+            foreach ($userDevices as $userDevice) {
+                $userDevice->setRefreshToken('');
+                $userDevice->setIsRevoked(true);
+                $userDevice->setIsCompromised(true);
+                $userDevice->setExpiresAt(new DateTime('-1 day'));
+            }
+
+            $em->flush();
+
+            return $this->json([], Response::HTTP_UNAUTHORIZED);
         }
 
         $newRefreshToken = bin2hex(random_bytes(64));
         $newHash = password_hash($newRefreshToken, PASSWORD_BCRYPT);
 
         $device->setRefreshToken($newHash);
+        $device->setLastUsedAt($refreshToken);
         $device->setExpiresAt((new DateTime())->modify('+7 days'));
         $device->setLastUsedAt((new DateTime()));
 
         $em->flush();
 
+        $accessToken = $jwtManager->create($this->getUser());
+
         return $this->json([
-            'refresh_token' => $newRefreshToken
+            'access_token' => $accessToken,
+            'refresh_token' => $newRefreshToken,
+            'device_id' => $device->getId()
         ], Response::HTTP_OK);
     }
     #[Route('/api/logout', name: 'logout', methods: ['POST'])]

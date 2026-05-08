@@ -37,6 +37,9 @@ class Device
     #[ORM\Column]
     private ?bool $isCompromised = null;
 
+    #[ORM\Column(length: 255)]
+    private ?string $previouseRefreshToken = null;
+
     public function getId(): ?int
     {
         return $this->id;
@@ -134,6 +137,18 @@ class Device
     public function setIsCompromised(bool $isCompromised): static
     {
         $this->isCompromised = $isCompromised;
+
+        return $this;
+    }
+
+    public function getPreviouseRefreshToken(): ?string
+    {
+        return $this->previouseRefreshToken;
+    }
+
+    public function setPreviouseRefreshToken(string $previouseRefreshToken): static
+    {
+        $this->previouseRefreshToken = $previouseRefreshToken;
 
         return $this;
     }
